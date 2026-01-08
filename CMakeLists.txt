@@ -8,6 +8,7 @@
 # For inquiries contact sibr@inria.fr and/or George.Drettakis@inria.fr
 
 CMAKE_MINIMUM_REQUIRED(VERSION 3.22)
+set(CMAKE_CUDA_ARCHITECTURES "native")
 
 set (CMAKE_SYSTEM_VERSION 10.0.15063.0 CACHE INTERNAL "Cmake system version" FORCE)
 PROJECT(sibr_projects)
@@ -85,7 +86,7 @@ else()
 		set(CMAKE_CXX_STANDARD_REQUIRED ON)
 		set(CMAKE_CXX_EXTENSIONS OFF)
 	elseif(${currentBuildTool} MATCHES "(make|gmake|ninja)")
-		add_definitions("-fpermissive -fPIC -Wall -Wno-unknown-pragmas -Wno-sign-compare -g -std=c++17 -D__forceinline=\"inline\ __attribute__((always_inline))\"")
+		add_definitions("-fpermissive -fPIC -w -g -std=c++17 -D__forceinline=\"inline\ __attribute__((always_inline))\"")
 	elseif(APPLE) ## \todo TODO: do a better test and send error on unsupported c++14 compiler
 	    add_definitions(-std=c++17 -stdlib=libc++)
 	endif()

@@ -41,9 +41,7 @@ namespace sibr {
 		/** Init FFMPEG, registering available codec plugins. */
 		if (!ffmpegInitDone) {
 			SIBR_LOG << "[FFMPEG] Registering all." << std::endl;
-			// Ignore next line warning.
-#pragma warning(suppress : 4996)
-			av_register_all();
+			// av_register_all() is deprecated in FFmpeg 4.0+, codecs are auto-registered
 			ffmpegInitDone = true;
 		}
 		
@@ -79,7 +77,7 @@ namespace sibr {
 		}
 
 		if (video_st) {
-			avcodec_close(video_st->codec);
+			avcodec_free_context(&pCodecCtx);
 			av_free(frameYUV);
 		}
 		avio_close(pFormatCtx->pb);
@@ -129,14 +127,14 @@ namespace sibr {
 			return;
 		}
 
-		video_st = avformat_new_stream(pFormatCtx, pCodec);
+		video_st = avformat_new_stream(pFormatCtx, NULL);
 
 		if (video_st == NULL) {
 			SIBR_WRG << "[FFMPEG] Could not create stream." << std::endl;
 			return;
 		}
 
-		pCodecCtx = video_st->codec;
+		pCodecCtx = avcodec_alloc_context3(pCodec);
 		pCodecCtx->codec_id = fmt->video_codec;
 		pCodecCtx->codec_type = AVMEDIA_TYPE_VIDEO;
 		pCodecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
@@ -165,6 +163,10 @@ namespace sibr {
 			SIBR_WRG << "[FFMPEG] Failed to open encoder, error: " << res << std::endl;
 			return;
 		}
+
+		// Copy codec parameters to stream
+		avcodec_parameters_from_context(video_st->codecpar, pCodecCtx);
+
 		// Write the file header.
 		avformat_write_header(pFormatCtx, NULL);
 
@@ -227,23 +229,39 @@ namespace sibr {
 	}
 
 #ifndef HEADLESS
-	bool FFVideoEncoder::encode(AVFrame * frame)
-	{
-		int got_picture = 0;
+bool FFVideoEncoder::encode(AVFrame *frame)
+{
+    // Send the frame to the encoder
+    int ret = avcodec_send_frame(pCodecCtx, frame);
+    if (ret < 0) {
+        SIBR_WRG << "[FFMPEG] Failed to send frame to encoder: " << ret << std::endl;
+        return false;
+    }
 
-		int ret = avcodec_encode_video2(pCodecCtx, pkt, frameYUV, &got_picture);
-		if (ret < 0) {
-			SIBR_WRG << "[FFMPEG] Failed to encode frame." << std::endl;
-			return false;
-		}
-		if (got_picture == 1) {
-			pkt->stream_index = video_st->index;
-			ret = av_write_frame(pFormatCtx, pkt);
-			av_packet_unref(pkt);
-		}
+    // Receive all available packets from the encoder
+    while (ret >= 0) {
+        ret = avcodec_receive_packet(pCodecCtx, pkt);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+            // No more packets available right now
+            break;
+        } else if (ret < 0) {
+            SIBR_WRG << "[FFMPEG] Error during encoding: " << ret << std::endl;
+            return false;
+        }
 
-		return true;
-	}
+        // Got a packet, write it
+        pkt->stream_index = video_st->index;
+        ret = av_write_frame(pFormatCtx, pkt);
+        if (ret < 0) {
+            SIBR_WRG << "[FFMPEG] Failed to write frame: " << ret << std::endl;
+            av_packet_unref(pkt);
+            return false;
+        }
+
+        av_packet_unref(pkt);
+    }
+
+    return true;
+}
 #endif
-
 }
